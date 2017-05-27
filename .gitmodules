@@ -1,0 +1,6 @@
+[submodule "secure_linux_setup_assistant"]
+	path = secure_linux_setup_assistant
+	url = https://github.com/mredig/secure_linux_setup_assistant.git
+[submodule "borg_run_conf"]
+	path = borg_run_conf
+	url = https://github.com/mredig/borg_run_conf.git
