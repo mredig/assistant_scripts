@@ -1,5 +1,4 @@
 # secure_linux_setup_assistant
-
 This is intended to be run very soon after an initial setup of linux. It will do the following to help facilitate a secure linux setup:
 * install `unattended-upgrades`
 	* install and setup `bsd-mailx` to report on upgrades
@@ -13,8 +12,7 @@ This is intended to be run very soon after an initial setup of linux. It will do
 	* installs `fail2ban` to blacklist individuals with failed ssh attempts
 * sets up `ufw` for firewall
 
-Here is a convenient direct link to the raw script that is easy enough to type into a console without copy/paste:
-# [need to fix](http://bit.ly/2o2WQ03)
+Here is a convenient direct link to the raw script that is easy enough to type into a console without copy/paste: [http://bit.ly/2qnzpTH](http://bit.ly/2qnzpTH)
 
 It is (ironically) best to enable root ssh access prior to running this script, but will disable that at the end.
 
@@ -24,3 +22,6 @@ There are a few reasons
 * ssh will allow you control this script via a computer you will be connecting from again in the future, so you will have easy, copy/paste access to your public ssh key, which the script will ask for
 
 Ultimately, you are free to run it through elevation or on a console session, but some of the features won't work (and might not completely reflect the fact that they didn't)
+
+
+This project originated as part of my Notes to self, but after some development I decided to separate these into separate projects and use submodules to keep them together
