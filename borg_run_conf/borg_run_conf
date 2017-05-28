@@ -41,7 +41,7 @@ sub processArguments {
 		}
 	}
 	if ($ranSomething == 0) {
-		print "Usage: borgScript.pl -c [pathtoconf1] -c [pathtoconf2]\n\nno limit on conf inputs\nwill DIE on first incorrectly formatted conf - following confs will NOT be run!\n";
+		print "Usage: borg_run_conf -c [pathtoconf1] -c [pathtoconf2]\n\nno limit on conf inputs\nwill DIE on first incorrectly formatted conf - following confs will NOT be run!\n";
 	}
 
 }
