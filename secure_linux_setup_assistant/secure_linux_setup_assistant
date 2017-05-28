@@ -1,0 +1,552 @@
+#!/usr/bin/perl
+
+if ($ARGV[0] eq "-d") {
+	$debug = 1;
+}
+
+$gNewUsername;
+
+
+&main;
+
+sub main {
+	&runOnSystem('clear && clear');
+
+	&sshdRootAccessCheck;
+
+	print "This script is based off my notes to myself after doing some reserach on securing linux. This occurred after one of my Raspberry Pis became infected with a virus and reinforced the imporatance after the Dyn internet outage. See http://bit.ly/lin-sec for more info.\n";
+	&enterToContinue;
+
+	print "Be sure that this script is launched AS ROOT (NOT sudo and NOT su - I mean you CAN run it with those, but you might run into errors) as it will be facilitating many system level changes, including manipulating users.\n";
+	&enterToContinue;
+
+	&printHeader("New User Setup");
+
+	my $newUser = &checkYn("Do you want to add a new user with sudo (important on raspbian, probably less so on other distros)?");
+	if ($newUser) {
+		&newUserSetup;
+	}
+
+	&printHeader("ssh Setup");
+	&sshSetup;
+
+	&printHeader("system ssh Setup");
+	chdir "/etc/ssh";
+	if (&doesItExist("sshd_config.default") == 0) {
+		&runOnSystem("cp sshd_config sshd_config.default");
+		&runOnSystem("chmod 700 sshd_config.default");
+	}
+	&sshdConfiguration;
+
+
+	&printHeader("Getting up to Date");
+
+
+	print "Please note that since the next step installs packages that require configuration afterwards, you will need to come back in a few minutes after the installation completes.";
+	&enterToContinue;
+
+	&updates; #bsd-mailx setup must happen after this & ufw
+
+	my $configMail = checkYn("Do you want to configure the mailx package?");
+	&configMail($configMail);
+
+	&configUpdates;
+
+	&configFirewall;
+
+	&finishUp;
+}
+
+sub configFirewall {
+	# show netstat
+	# ask if wanting to limit to subnet
+	# note ssh for user
+
+	print "About to show running processes with open network sockets to help with configuring firewall";
+	&enterToContinue;
+	&runOnSystem("netstat -tulpn");
+
+	my $limitedSubnetSetup = &checkYn("Do you want to limit any connections to just one subnet?");
+
+	my @ufwCommands;
+	if ($limitedSubnetSetup) {
+		my $subnet;
+		while ($subnet !~ /^\d+\.\d+\.\d+\.\d+\/\d+$/) {
+			print "Please enter the subnet with CIDR notation (ex 192.168.1.0/24):";
+			chomp($subnet = <STDIN>);
+		}
+		print "Please enter all ports separated by spaces that you wish to have only accessible via this subnet (don't forget you need port 22 for ssh to work if you are setting up through that):\n";
+		chomp(my $ports = <STDIN>);
+		my @subnetPorts = split / /, $ports;
+		foreach (@subnetPorts) {
+			$_ =~ s/\D//;
+			if ($_ =~ /\d+/) {
+				push @ufwCommands, "ufw allow from $subnet to any port $_";
+			}
+		}
+	}
+
+
+	my $openSetup = &checkyN("Do you want to allow any connections from anywhere?");
+	if ($openSetup) {
+		print "Please enter all ports separated by spaces that you wish to have accessible from any network, whether it's part of this subnet or not (don't forget you need port 22 for ssh to work if you are setting up through that):\n";
+		chomp(my $ports = <STDIN>);
+		my @subnetPorts = split / /, $ports;
+		foreach (@subnetPorts) {
+			$_ =~ s/\D//;
+			if ($_ =~ /\d+/) {
+				push @ufwCommands, "ufw allow $_";
+			}
+		}
+	}
+
+	my $satisfied = checkYn("Are you satisfied with these entries?");
+	if ($satisfied) {
+		my $ufwFile = "/var/tmp/ufwCommands.sh";
+		print "These commands will run after reboot (assuming your crontab supports '\@reboot' - otherwise the script will be saved as $ufwFile):\n\n\n";
+		foreach (@ufwCommands) {
+			print "$_\n";
+		}
+		print "ufw enable\n\n\n";
+
+		open UFW, ">$ufwFile";
+		print UFW "#!/bin/sh\n\nPATH=\$PATH:/usr/sbin:/bin:/usr/bin\n\n";
+		foreach (@ufwCommands) {
+			print UFW "$_\n";
+		}
+		print UFW "ufw enable\n";
+
+		print UFW "rm $ufwFile\n";
+
+		my $esc = &escapeSpecial($ufwFile);
+		print UFW "(crontab -l 2>/dev/null) | sed 's/^\\(\@reboot $esc.*\\)/# \\1/' | crontab -";
+		close UFW;
+
+		chmod 755, $ufwFile;
+		# echo '@reboot env > ~/env' | sed 's/^\(.*env > ~\/env.*\)/# \1/'
+		# crontab -l 2>/dev/null; echo '\@reboot $ufwFile') | sed 's/^\(//' | crontab -")
+
+		&runOnSystem("(crontab -l 2>/dev/null;echo '\@reboot $ufwFile') | crontab -");
+
+	} else {
+		&configFirewall;
+	}
+
+}
+
+sub escapeSpecial {
+	my $str = $_[0];
+	$str =~ s/\//\\\//g;
+	$str =~ s/\./\\\./g;
+	return $str;
+}
+
+sub configUpdates {
+	print "Please choose yes to activate unattended-upgrades:";
+	&enterToContinue;
+	&runOnSystem("dpkg-reconfigure unattended-upgrades");
+	print "About to open config for unattended-upgrades - please make sure the stuff you need isn't commented and pay attention to the email and reboot settings:";
+	&enterToContinue;
+	&runOnSystem("nano /etc/apt/apt.conf.d/50unattended-upgrades");
+}
+
+sub configMail {
+	my $config = $_[0];
+	if ($config) {
+		print "Follow prompts and use common sense for setup:";
+		&enterToContinue;
+		&runOnSystem("dpkg-reconfigure exim4-config");
+	}
+
+}
+
+sub newUserSetup {
+	print "What username would you like?: ";
+	chomp(my $newUsername = <STDIN>);
+	$newUsername =~ s/\W//gi;
+	my $confirm = &checkYn("'$newUsername' - is this correct?");
+	if ($confirm == 0) {
+		print "Try one more time: ";
+		chomp($newUsername = <STDIN>);
+		$newUsername =~ s/\W//gi;
+		$confirm = &checkYn("'$newUsername' - is this correct?");
+		if ($confirm == 0) {
+			&dieWithMessage("too many username attempts");
+		}
+	}
+	print "Adding new user '$newUsername' - please follow prompts from system utility:\n";
+	$gNewUsername = $newUsername;
+	&runOnSystem("adduser $newUsername");
+	&runOnSystem("adduser $newUsername sudo");
+
+	&checkPiUser;
+}
+
+sub sshSetup {
+	my $sshConfirm;
+	if ($gNewUsername ne "") {
+		$sshConfirm = &checkYn("Would you like to configure ssh for $gNewUsername?");
+	} else {
+		$sshConfirm = &checkYn("Would you like to configure ssh for a user?");
+	}
+
+	if ($sshConfirm == 0) {
+		return;
+	}
+
+	if ($gNewUsername eq "") {
+		print "Which user?: ";
+		chomp($gNewUsername = <STDIN>);
+		$gNewUsername =~ s/\W//gi;
+	}
+
+	chdir "/home/";
+	chdir "$gNewUsername";
+	if (&doesItExist(".ssh") == 0) {
+		&runOnSystem("mkdir .ssh");
+	}
+	chdir ".ssh";
+	if (&doesItExist("id_rsa") == 0) {
+		print "Creating ssh key - follow prompts and\n\t-save file as /home/$gNewUsername/.ssh/id_rsa\n\t-add a password if you like, but I would argue it's not necessary\n";
+		&runOnSystem("ssh-keygen -t rsa -b 4096");
+		my $printPub = &checkYn("Would you like the public key printed onscreen?");
+		if ($printPub) {
+			&showFileContents("id_rsa.pub");
+		}
+	}
+
+	if (&doesItExist("authorized_keys") == 0) {
+		&runOnSystem("touch authorized_keys");
+	}
+	print "Paste any public ssh keys in here and press CTRL-D when finished (http://bit.ly/ssh-keygen for more info):\n\n";
+	my @publicKeys = <STDIN>;
+	open KEYS, ">>authorized_keys";
+	print KEYS "@publicKeys";
+	close KEYS;
+
+	chdir "../";
+
+	&runOnSystem("chmod -R 700 .ssh");
+	&runOnSystem("chown -R $gNewUsername:$gNewUsername .ssh");
+
+
+
+
+}
+
+
+sub sshdRootAccessCheck {
+	open SSHDCONFIG, "</etc/ssh/sshd_config" or die "Can't open /etc/ssh/sshd_config: $!\n";
+	my @sshdconf = <SSHDCONFIG>;
+	close SSHDCONFIG;
+
+	my $rootOn = &sshdGetOption("PermitRootLogin", @sshdconf);
+	if ($rootOn !~ /yes/i) {
+		my $argument = "Would you like to temporarily set a root password and enable root login over ssh so you can run this utility? This allows you to be able to easily copy/paste your ssh public key and assures that the other portions of the script will function correctly. These options will be reverted by keeping with the defaults of this script when run from ssh. (also please make sure you're running this with elevated privileges)";
+		my $turnItOn = &checkYn("$argument");
+		if ($turnItOn == 1) {
+			@sshdconf = &sshdAddOption("PermitRootLogin", "yes", @sshdconf);
+			@sshdconf = &sshdAddOption("PasswordAuthentication", "yes", @sshdconf);
+			open SSHDCONFIG, ">/etc/ssh/sshd_config" or die "Can't save /etc/ssh/sshd_config: $!\n";
+			foreach(@sshdconf) {
+				print SSHDCONFIG $_;
+			}
+			close SSHDCONFIG;
+			&runOnSystem("/etc/init.d/ssh restart");
+			die "Run the following commands to change the root password:\n\n\tsudo su\n\tpasswd\n\texit\n\n...Close any other non root sessions and then log in over ssh. Also recommended is to run raspi-config if you're running a Pi before rebooting.\n";
+		}
+
+	}
+
+}
+
+sub sshdConfiguration {
+
+		open SSHDCONFIG, "</etc/ssh/sshd_config";
+		my @sshdconf = <SSHDCONFIG>;
+		close SSHDCONFIG;
+
+		my $permitRoot = &checkyN("Do you want to permit root access to ssh?");
+		if ($permitRoot == 1) {
+			@sshdconf = &sshdAddOption("PermitRootLogin", "yes", @sshdconf);
+		} else {
+			@sshdconf = &sshdAddOption("PermitRootLogin", "no", @sshdconf);
+		}
+
+		my $passwordAuth = &checkyN("Do you want to allow password login over ssh (Important! Choose YES if you didn't setup any public keys earlier or you will be locked out of ssh!)?");
+		if ($passwordAuth == 1) {
+			@sshdconf = &sshdAddOption("PasswordAuthentication", "yes", @sshdconf);
+		} else {
+			@sshdconf = &sshdAddOption("PasswordAuthentication", "no", @sshdconf);
+		}
+
+		my $ip4Address = &checkYn("Do you want to allow ssh access on IPv4?");
+		my $ip6Address = &checkyN("Do you want to allow ssh access on IPv6?");
+		if ($ip4Address == 1 && $ip6Address == 1) {
+			@sshdconf = &sshdAddOption("AddressFamily", "any", @sshdconf);
+
+		} elsif ($ip4Address == 0 && $ip6Address == 1) {
+			@sshdconf = &sshdAddOption("AddressFamily", "inet6", @sshdconf);
+
+		} elsif ($ip4Address == 1 && $ip6Address == 0) {
+			@sshdconf = &sshdAddOption("AddressFamily", "inet", @sshdconf);
+
+		}
+
+		my $changePort = &checkyN("Do you want to change the default port for ssh?");
+		if ($changePort == 1) {
+			print "What port?: ";
+			chomp(my $sshPort = <STDIN>);
+			$sshPort =~ s/\D//;
+			@sshdconf = &sshdAddOption("Port", $sshPort, @sshdconf);
+
+		}
+
+		print "Here's the new sshd_config:";
+
+		&enterToContinue;
+		foreach(@sshdconf) {
+			print $_;
+		}
+
+		my $saveSSHD = &checkYn("Save these changes to sshd_config (a backup has been made)?");
+		if ($saveSSHD && $debug == 0) {
+			open SSHDCONFIG, ">sshd_config";
+			foreach(@sshdconf) {
+				print SSHDCONFIG $_;
+			}
+			close SSHDCONFIG;
+		} else {
+			my $again = checkYn("Would you like to go through sshd_config setup again?");
+			if ($again) {
+				&sshdConfiguration;
+			}
+		}
+}
+
+
+sub sshdAddOption {
+	my $optionName = shift @_;
+	my $optionValue = shift @_;
+	my @sshdConfig = @_;
+
+	my $newLine = "$optionName $optionValue\n";
+
+	foreach my $line (@sshdConfig) {
+		if ($line =~ /^$optionName/) {
+			$line = $newLine;
+			return @sshdConfig;
+		}
+	}
+
+	push @sshdConfig, $newLine;
+	return @sshdConfig;
+}
+
+sub sshdGetOption {
+	my $optionName = shift @_;
+	my @sshdConfig = @_;
+
+	my $rValue = "";
+	foreach my $line (@sshdConfig) {
+		if ($line =~ /^$optionName\s+(.*)/) {
+			$rValue = $1;
+			return $rValue;
+		}
+	}
+
+	return $rValue;
+}
+
+sub checkPiUser {
+	my $remove = &checkyN("This is only relevant if you are using raspbian - would you like to remove the user and homefolder for 'pi'? (Note that this only works if you are NOT using sudo or su - aka logged directly into root!)");
+	if ($remove) {
+		&runOnSystem("deluser --remove-home pi");
+	}
+
+}
+
+sub updates {
+	my $piAptSources = &checkyN("Is this a Pi that you would like to set to a US apt mirror for?");
+	if ($piAptSources == 1) {
+		my $sourcesPath = "/etc/apt/sources.list";
+		open SOURCES, "<$sourcesPath";
+		my @sources = <SOURCES>;
+		close SOURCES;
+
+		foreach my $line (@sources) {
+			if ($line =~ /mirrordirector/i) {
+				my $comment = "# " . $line;
+				$line =~ s/^deb http:\/\/mirrordirector\.raspbian\.org\/raspbian\/?\s(.*)/deb http:\/\/mirror.us.leaseweb.net\/raspbian\/raspbian $1/;
+				$line = $comment . $line;
+			}
+
+		}
+
+		open SOURCES, ">$sourcesPath";
+		foreach my $line (@sources) {
+			print SOURCES "$line";
+		}
+		close SOURCES;
+	}
+
+
+
+	my $runUpgrades = &checkYn("Do you want to run upgrades before continuing? (apt-get update will run regardless)");
+
+	&fixListChanges;
+	# &enterToContinue;
+
+	&runOnSystem('apt-get update');
+
+	if ($runUpgrades) {
+		&runOnSystem("apt-get upgrade -y");
+	}
+
+	&runOnSystem('apt-get install unattended-upgrades bsd-mailx fail2ban ufw -y')
+
+}
+
+sub fixListChanges {
+	my $aptChanges = "/etc/apt/listchanges.conf";
+	open LISTCHANGES, "<$aptChanges";
+	my @listChanges = <LISTCHANGES>;
+	close LISTCHANGES;
+
+	@listChanges = &listChangesAddOption("frontend", "text", @listChanges);
+
+	my $changeApt = &checkYn("Change $aptChanges to NOT stop apt upgrades?");
+	if ($changeApt) {
+		open LISTCHANGES, ">$aptChanges";
+		foreach(@listChanges) {
+			print LISTCHANGES $_;
+		}
+		close LISTCHANGES;
+	}
+
+}
+
+
+sub listChangesAddOption {
+	my $optionName = shift @_;
+	my $optionValue = shift @_;
+	my @listChangesConf = @_;
+
+	my $newLine = "$optionName=$optionValue\n";
+
+	foreach my $line (@listChangesConf) {
+		if ($line =~ /^$optionName/) {
+			$line = $newLine;
+			return @listChangesConf;
+		}
+	}
+
+	push @listChangesConf, $newLine;
+	return @listChangesConf;
+}
+
+
+sub finishUp {
+	print "Running a few finishing touches...";
+	# restart ssh
+	print "Restarting ssh...";
+	&runOnSystem("service ssh restart");
+	print "Done.\n";
+
+	my $lockRootPass = checkYn("Would you like to lock the root password? (You can still sudo or sudo su, even with the option to set the password again in the future)");
+	if ($lockRootPass) {
+		&runOnSystem("passwd -l root");
+	}
+
+
+
+	my $reboot = &checkYn("Finished. Would you like to reboot now?");
+	if ($reboot) {
+		&runOnSystem("reboot");
+	}
+
+}
+
+## support routines
+
+sub showFileContents {
+	my $file = $_[0];
+	open FILE, "<$file";
+	my @hold = <FILE>;
+	foreach(@hold) {
+		print $_;
+	}
+	close FILE;
+}
+
+sub doesItExist {
+	my $name = $_[0];
+	if (-e $name) {
+		return 1;
+	} else {
+		return 0;
+	}
+
+}
+
+sub printHeader {
+	my $header = $_[0];
+	&runOnSystem("clear");
+	print "\n\n\t$header:\n\n";
+}
+
+sub runOnSystem {
+	my $command = $_[0];
+	if ($debug) {
+		print "debug: $command\n";
+	} else {
+		print "\n\n[[executing: $command]]\n\n";
+		system("$command");
+	}
+
+}
+
+sub dieWithMessage {
+	my $message = $_[0];
+	die "Please start the script again: $message\n";
+}
+
+sub enterToContinue {
+	print "\nPress enter to continue...\n";
+	my $enter = <STDIN>;
+}
+
+sub checkYn {
+	my $prompt = $_[0] . " [Y/n]:";
+	print "$prompt";
+	my $return = -1;
+	while($return == -1) {
+		chomp(my $yn = <STDIN>);
+		if ($yn =~ /^y*$/i) {
+		 	$return = 1;
+		} elsif ($yn =~ /^n+$/i) {
+			$return = 0;
+		} else {
+			print "Sorry, that's not valid input. Please try again:\n\n$prompt";
+		}
+	}
+	return $return;
+
+}
+
+sub checkyN {
+	my $prompt = $_[0] . " [y/N]:";
+	print "$prompt";
+	my $return = -1;
+	while($return == -1) {
+		chomp(my $yn = <STDIN>);
+		if ($yn =~ /^y+$/i) {
+		 	$return = 1;
+		} elsif ($yn =~ /^n*$/i) {
+			$return = 0;
+		} else {
+			print "Sorry, that's not valid input. Please try again:\n\n$prompt";
+		}
+	}
+	return $return;
+}
