@@ -1,0 +1,429 @@
+#!/usr/bin/perl
+
+use Cwd 'abs_path';
+use File::Basename;
+
+# root crontab
+# 0 1 * * 3 /path/to/borgScript -c /path/to/conffile.conf
+
+
+# usage:
+# borgScript.pl -c [pathtoconf1] -c [pathtoconf2]
+# no limit on conf inputs
+# will DIE on first incorrectly formatted conf - following confs will NOT be run!
+
+### variables
+$timeNow = &getTimeStampString;
+$debug = 0;
+@mailLog = ();
+
+my $scriptPath = abs_path($0);
+my $scriptDir = dirname($scriptPath);
+
+
+$ENV{'BORG_RELOCATED_REPO_ACCESS_IS_OK'} = "yes";
+$ENV{'PATH'} .= ":/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:$scriptDir";
+
+&main;
+
+sub main {
+	&processArguments;
+}
+
+
+sub processArguments {
+	$ranSomething = 0;
+	for (my $i = 0; $i < scalar(@ARGV); $i++) {
+		my $arg = $ARGV[$i];
+		if ($arg =~ /^-(\w)/) {
+			$arg = $1;
+			&processArgument($arg, $ARGV[$i + 1]);
+		}
+	}
+	if ($ranSomething == 0) {
+		print "Usage: borgScript.pl -c [pathtoconf1] -c [pathtoconf2]\n\nno limit on conf inputs\nwill DIE on first incorrectly formatted conf - following confs will NOT be run!\n";
+	}
+
+}
+
+
+sub processArgument {
+	my $arg = $_[0];
+	my $nextArg = $_[1];
+	if ($arg eq "c" && $nextArg ne "") { #maybe do -e
+		my $confFile = $nextArg;
+		my %borgJob = &loadConfFile($confFile);
+		&runBorgJob(\%borgJob);
+	} elsif ($arg eq "d") {
+		$debug = 1;
+	}
+}
+
+sub processConf {
+	my $confFile = shift @_;
+	my @confContents = @_;
+	my %borgJob;
+	$borgJob{"confFile"} = $confFile;
+	foreach my $line (@confContents) { ## read the conf file and set each key value pair in hash to what's in the conf document
+		$line =~ s/#.*$//;
+
+		$line =~ s/\$timeNow/$timeNow/i;
+
+		$line =~ /^([\-\w]+)\s?=\s?\"(.*)\"/;
+		my $option = $1;
+		my $value = $2;
+		# print "$option is $value\n";
+		$borgJob{$option} = $value;
+	}
+
+	$borgJob{'backupPath'} = &processBackupPath($borgJob{'backupPath'});
+
+	$borgJob{'logDirectory'} = &checkTrailingSlash("$borgJob{'logDirectory'}");
+	$borgJob{'pruneLogSTDOUT'} = "$borgJob{'logDirectory'}" . "$borgJob{'backupName'}_pruneSTDOUT.log";
+	$borgJob{'backupLogSTDOUT'} = "$borgJob{'logDirectory'}" . "$borgJob{'backupName'}_STDOUT.log";
+	$borgJob{'backupLog'} = "$borgJob{'logDirectory'}" . "$borgJob{'backupName'}.log";
+	$borgJob{'lockFile'} = "/tmp/$borgJob{'backupName'}.lock";
+
+
+	&checkValidity(\%borgJob);
+	return %borgJob;
+}
+
+sub processBackupPath {
+	my $backupPath = $_[0];
+	my $rPaths = "";
+	my @paths = split ";", $backupPath;
+	foreach(@paths) {
+		$_ = "'$_'";
+		$rPaths .= "$_ ";
+	}
+	print "paths to backup: $rPaths\n";
+	return $rPaths;
+}
+
+
+sub runBorgJob {
+	my %borgJob = %{$_[0]};
+	my $logFile = $borgJob{'backupLog'};
+	my $lockFile = $borgJob{'lockFile'};
+
+#open LOG file
+	$ranSomething = 1;
+	open LOG, ">>$logFile";
+	if (-e $lockFile) {
+		&logit("$timeNow lockfile $lockFile exists - make sure backup isn't running right now\n");
+		die "lockfile $lockFile exists  - make sure backup isn't running right now\n";
+	}
+	open LOCK, ">$lockFile";
+
+	&logit("------------------------------");
+
+	@mailLog = ();
+
+#run backup
+
+	$timeNow = &getTimeStampString;
+
+	&logit("### $timeNow: Starting $borgJob{'backupName'} backup...\n");
+# >/dev/null 2>&1
+
+	my $borgCommand = "borg create $borgJob{'arguments'} --exclude-from $borgJob{'excludeFile'} $borgJob{'repository'}" . "::$borgJob{'archiveName'} $borgJob{'backupPath'} " . '> ' . "'$borgJob{'backupLogSTDOUT'}' 2>&1";
+	&logit("\n* `$borgCommand`\n\n");
+	my $runBorg = "not run";
+	if ($debug == 0) {
+		$runBorg = system("$borgCommand");
+		$runBorg = processReturnCode($runBorg);
+	}
+	&logit("#### $borgJob{'backupName'} backup borg script ran successful: *$runBorg*\n\n");
+
+	my @pruneTailIndent;
+	&logit("##### pruning: $borgJob{'prune'}");
+	if ($borgJob{"prune"} eq "yes" && $debug == 0) {
+
+		my $pruneCommand = &generatePruneCommand(\%borgJob);
+		&logit("\n* `$pruneCommand`\n\n");
+		my $runPrune = "not run";
+		$runPrune = system("$pruneCommand"); ## dry run on debug mode
+		$runPrune = processReturnCode($runPrune);
+		&logit("#### $borgJob{'backupName'} prune borg script ran successful: *$runPrune*\n");
+		my $pruneTail = `cat '$borgJob{'pruneLogSTDOUT'}'`;
+		@pruneTailIndent = &indent(1, $pruneTail);
+
+	}
+
+	&logit("* return code [reference](http://borgbackup.readthedocs.io/en/stable/usage.html#return-codes)\n\n");
+
+	$timeNow = &getTimeStampString;
+	&logit("#### $timeNow: $borgJob{'backupName'} backup finished!\n\n");
+
+
+	my $tail = `tail -n 16 '$borgJob{'backupLogSTDOUT'}'`;
+	my @tailIndent = &indent(1, $tail);
+	push @mailLog, @pruneTailIndent;
+	push @mailLog, @tailIndent;
+
+
+
+#close LOG
+
+	close LOG;
+	close LOCK;
+	unlink $lockFile;
+
+	&mailReport($borgJob{'mailReport'}, $borgJob{'backupName'});
+
+	if (exists($borgJob{'onSuccessExit'})) {
+		# &finishCommand
+		if (($runBorg == 0 || $runPrune == 0)) {
+			&finishCommand($borgJob{'onSuccessExit'})
+		}
+	}
+
+	if (exists($borgJob{'onFailureExit'})) {
+		my $runCommand = 0;
+		if ($runBorg != 0 && $runBorg ne "not run") {
+			$runCommand = 1;
+		}
+		if ($runPrune != 0 && $runPrune ne "not run") {
+			$runCommand = 1;
+		}
+
+		if ($runCommand == 1) {
+			&finishCommand($borgJob{'onFailureExit'})
+		}
+	}
+
+}
+
+sub processReturnCode {
+	my $code = $_[0];
+	my $rval = "";
+
+	if ($code == -1) {
+		return "Failed to execute the command.\n";
+	} elsif ($code & 127) {
+		$rval = $code & 127;
+	} else {
+		$rval = $code >> 8;
+	}
+
+	return $rval;
+
+}
+
+sub finishCommand {
+	my $command = $_[0];
+	&logit("running $command");
+	my $rCode = 0;
+	if ($debug == 0) {
+		$rCode = system("$command");
+	}
+	$rCode = processReturnCode($rCode);
+	return $rCode;
+}
+
+sub generatePruneCommand {
+	my %borgJob = %{$_[0]};
+
+	my $pruneCommand = "borg prune -v $borgJob{'repository'} --list ";
+	if (exists($borgJob{"keep-daily"})) {
+		$pruneCommand .= "--keep-daily=$borgJob{'keep-daily'} ";
+	}
+	if (exists($borgJob{"keep-weekly"})) {
+		$pruneCommand .= "--keep-weekly=$borgJob{'keep-weekly'} ";
+	}
+	if (exists($borgJob{"keep-monthly"})) {
+		$pruneCommand .= "--keep-monthly=$borgJob{'keep-monthly'} ";
+	}
+	if (exists($borgJob{"keep-within"})) {
+		$pruneCommand .= "--keep-within=$borgJob{'keep-within'} ";
+	}
+	if (exists($borgJob{"keep-last"})) {
+		$pruneCommand .= "--keep-last=$borgJob{'keep-last'} ";
+	}
+	if (exists($borgJob{"keep-hourly"})) {
+		$pruneCommand .= "--keep-hourly=$borgJob{'keep-hourly'} ";
+	}
+	if (exists($borgJob{"keep-yearly"})) {
+		$pruneCommand .= "--keep-yearly=$borgJob{'keep-yearly'} ";
+	}
+	if (exists($borgJob{"prefix"})) {
+		$pruneCommand .= "--prefix='$borgJob{'prefix'}' ";
+	}
+	if ($debug == 1) {
+		$pruneCommand .= "--dry-run "
+	}
+
+
+
+	$pruneCommand .= "> '$borgJob{'pruneLogSTDOUT'}' 2>&1";
+	return $pruneCommand;
+}
+
+sub logit {
+	my $log = shift @_;
+
+	if ($log !~ /^.*\n$/) { #add newline if none
+		$log .= "\n";
+	}
+
+	print "$log";
+	if ($debug == 0) {
+		print LOG "$log";
+	}
+	push @mailLog, $log;
+}
+
+sub mailReport {
+	my $mailTo = $_[0];
+	my $backupName = $_[1];
+
+	if ($mailTo eq "") { #skip if no mail report set
+		return;
+	}
+
+	my $dateString = &getDateString;
+	my $host = `hostname`;
+	chomp($host);
+	my $from = "borgReport\@$host";
+	my $subject = "Borg Report for $backupName - $dateString";
+	my $message;
+
+	foreach(@mailLog) {
+		$message .= $_;
+	}
+
+	my $tmpMD = "/tmp/$backupName.md";
+	open TMP, ">$tmpMD";
+	print TMP "$message";
+	close TMP;
+	my $execDir = &getExecutableDirectory;
+	my $mdCommand = $execDir . "/markdown/Markdown.pl '$tmpMD'";
+	my $md = `$mdCommand`;
+	unlink $tmpMD;
+
+	open(MAIL, "|/usr/sbin/sendmail -t");
+
+	# Email Header
+	print MAIL "To: $mailTo\n";
+	print MAIL "From: $from\n";
+	print MAIL "Subject: $subject\n";
+	print MAIL "Content-Type: text/html; charset=UTF-8\n\n\n";
+	# Email Body
+	print MAIL $md;
+
+	close(MAIL);
+	# print "Email Sent Successfully\n";
+}
+
+sub getExecutableDirectory {
+	my $fullPath = abs_path($0);
+	my $dirname  = dirname($fullPath);
+	return $dirname;
+}
+
+sub loadConfFile {
+	my $confFile = $_[0];
+	open CONF, "$confFile" or die "can't open conf file: $!";
+	my @confContents = <CONF>;
+	close CONF;
+	my %borgJob = &processConf($confFile, @confContents);
+	return %borgJob;
+}
+
+sub indent {
+	my $indentCount = $_[0];
+	my $str = $_[1];
+
+	my @lines = split "\n", $str;
+	my $tab;
+	for (my $i = 0; $i < $indentCount; $i++) {
+		$tab .= "\t";
+	}
+
+	foreach(@lines) {
+		$_ = "$tab$_\n";
+	}
+	return @lines;
+}
+
+
+sub checkValidity {
+	my %borgJob = %{$_[0]};
+	my $confFile = $borgJob{"confFile"};
+	&checkValidityInVar($borgJob{"repository"}, $confFile);
+	&checkValidityInVar($borgJob{"backupPath"}, $confFile);
+	&checkValidityInVar($borgJob{"excludeFile"}, $confFile);
+	&checkValidityInVar($borgJob{"arguments"}, $confFile);
+	&checkValidityInVar($borgJob{"archiveName"}, $confFile);
+	&checkValidityInVar($borgJob{"backupName"}, $confFile);
+	&checkValidityInVar($borgJob{"logDirectory"}, $confFile);
+}
+
+sub checkValidityInVar {
+	my $var = $_[0];
+	my $confFile = $_[1];
+
+	if ($var eq "") {
+		&printConfInfo;
+		die "\nERROR: missing information in conf file: $confFile\n";
+	}
+}
+
+sub checkTrailingSlash {
+	my $str = $_[0];
+	if ($str !~ /\/$/) {
+		$str .= "/";
+	}
+	return $str;
+}
+
+sub printConfInfo {
+	print 'The conf file consists of each line designating a different option. You must specify a conf file and you must include all the following options in your conf file:
+
+logDirectory = "/PATH/TO/LOG/DIRECTORY"
+repository = "/PATH/TO/REPO" #(ssh paths allowed)
+archiveName = "ArchiveNameWith\'$timeNow\'"
+backupPath = "/PATH/TO/OBJECT;/PATH/TO/ANOTHER/FOLDER" # the path(s) that get backed up - separated by a semi colons (;)
+excludeFile = "/PATH/TO/OBJECT"
+arguments = "--show-rc -v --stats -p --list -C zlib,9"
+backupName = "unparsed name of the backup job for log reasons"
+mailReport = "email@address.com" # optional: will email a report after a run is finished
+onSuccessExit = "command" # optional: an optional command to run on finish when either pruning or creating an archive is successful
+onFailureExit = "command" # optional: an optional command to run on finish when either pruning or creating an archive has failed
+prune = "yes" # optional: any value other than "yes" will skip pruning
+keep-hourly = "14" # optional: 14 = keep at most 1 archive for each of last 14 hours, -1 = keep 1 archive from every hour
+keep-daily = "14" # optional: see hours
+keep-weekly = "number" # optional: see hours
+keep-monthly = "number" # optional: see hours
+keep-yearly = "number" # optional: see hours
+keep-last = "number" # optional: see borg documentation
+keep-within  = "number" # optional: see borg documentation
+
+
+You may comment information with "#":
+# this is a comment
+';
+}
+
+sub getTimeStampString() {
+	($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+
+	$year += 1900;
+	$mon += 1;
+	$mon = sprintf("%02d", $mon);
+	$mday = sprintf("%02d", $mday);
+	$hour = sprintf("%02d", $hour);
+	$min = sprintf("%02d", $min);
+	$string = "$year$mon$mday-$hour$min";
+	return $string;
+}
+
+sub getDateString() {
+	($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+
+	$mon += 1;
+	my $string = "$mon/$mday";
+	return $string;
+
+}
