@@ -4,11 +4,11 @@ use Cwd 'abs_path';
 use File::Basename;
 
 # root crontab
-# 0 1 * * 3 /path/to/borgScript -c /path/to/conffile.conf
+# 0 1 * * 3 /path/to/borg_run_conf -c /path/to/conffile.conf
 
 
 # usage:
-# borgScript.pl -c [pathtoconf1] -c [pathtoconf2]
+# borg_run_conf -c [pathtoconf1] -c [pathtoconf2]
 # no limit on conf inputs
 # will DIE on first incorrectly formatted conf - following confs will NOT be run!
 
