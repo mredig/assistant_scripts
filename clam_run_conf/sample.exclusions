@@ -1,0 +1,6 @@
+FILE EXCLUSIONS:
+filename.ext
+/path/to/filename2.ext
+
+DIRECTORY EXCLUSIONS:
+^/path/to/directory
