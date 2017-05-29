@@ -61,7 +61,7 @@ sub processArgument {
 sub processConf {
 	my $confFile = shift @_;
 	my @confContents = @_;
-	my %clamJob;
+	my %clamJob = &generateConfDefaults;
 	$clamJob{"confFile"} = $confFile;
 	foreach my $line (@confContents) { ## read the conf file and set each key value pair in hash to what's in the conf document
 		$line =~ s/#.*$//;
@@ -76,33 +76,95 @@ sub processConf {
 	}
 
 	$clamJob{'logDirectory'} = &checkTrailingSlash("$clamJob{'logDirectory'}");
+	$clamJob{'logFile'} = $clamJob{'logDirectory'} . "clam_run_conf-" . $clamJob{'jobName'} . "-$timeNow";
 	$clamJob{'lockFile'} = "/tmp/$clamJob{'jobName'}.lock";
 
 	&checkValidity(\%clamJob);
 	return %clamJob;
 }
 
-sub processBackupPath {
-	my $backupPath = $_[0];
-	my $rPaths = "";
-	my @paths = split ";", $backupPath;
-	foreach(@paths) {
-		$_ = "'$_'";
-		$rPaths .= "$_ ";
-	}
-	print "paths to backup: $rPaths\n";
-	return $rPaths;
+sub generateConfDefaults {
+	my %clamJob;
+	$clamJob{'mailInfectionOnly'} = "NO";
+	$clamJob{'detectPUA'} = "NO";
+	$clamJob{'scanArchive'} = "YES";
+	$clamJob{'infectedOnly'} = "YES";
+	$clamJob{'recursive'} = "YES";
+	return %clamJob;
 }
 
 
+sub generateClamCommand {
+	my %clamJob = %{$_[0]};
+	my $arguments;
+	if ($clamJob{'infectedOnly'} =~ /yes/i) {
+		$arguments .= " -i";
+	}
+	if ($clamJob{'recursive'} =~ /yes/i) {
+		$arguments .= " -r";
+	}
+
+	$arguments .= $clamJob{'arguments'};
+
+	if ($clamJob{'detectPUA'} =~ /yes/i) {
+		$arguments .= " --detect-pua=yes";
+	}
+	if ($clamJob{'scanArchive'} =~ /yes/i) {
+		$arguments .= " --scan-archive=yes";
+	}
+
+	my $exclusionsArgs = "";
+	$exclusionsArgs = &processExcludeFile($clamJob{'excludeFile'});
+
+	my $clamCommand = "clamscan $arguments -l '$clamJob{'logFile'}' $exclusionsArgs '$clamJob{'scanDirectory'}'";
+	return $clamCommand;
+}
+
+sub processExcludeFile {
+	my $excludeFile = $_[0];
+	open EXCLUDE, "$excludeFile" or &logit("no exclude file provided, still using defaults");
+	my @allExclusions = <EXCLUDE>;
+	close EXCLUDE;
+
+	my @fileExclusions;
+	my @dirExclusions = ('^/sys', '^/dev', '^/proc');
+	my $mode;
+	foreach(@allExclusions) {
+		chomp($_);
+		if ($_ =~ /FILE EXCLUSIONS:/) {
+			$mode = "file";
+			next;
+		} elsif ($_ =~ /DIRECTORY EXCLUSIONS:/) {
+			$mode = "dir";
+			next;
+		}
+
+		if ($mode eq "file" && $_ !~ /^$/) {
+			push @fileExclusions, $_;
+		}
+		if ($mode eq "dir" && $_ !~ /^$/) {
+			push @dirExclusions, $_;
+		}
+	}
+
+	my $exclusionsArgs;
+	foreach (@fileExclusions) {
+		$exclusionsArgs .= " --exclude=$_";
+	}
+	foreach (@dirExclusions) {
+		$exclusionsArgs .= " --exclude-dir=$_";
+	}
+
+	return $exclusionsArgs;
+}
+
 sub runClamJob {
 	my %clamJob = %{$_[0]};
-	my $logFile = $clamJob{'backupLog'};
 	my $lockFile = $clamJob{'lockFile'};
 
 	#open LOG file
 	$ranSomething = 1;
-	open LOG, ">>$logFile";
+	# open LOG, ">>$logFile";
 	if (-e $lockFile) {
 		&logit("$timeNow lockfile $lockFile exists - make sure backup isn't running right now\n");
 		die "lockfile $lockFile exists  - make sure backup isn't running right now\n";
@@ -120,37 +182,36 @@ sub runClamJob {
 	&logit("### $timeNow: Starting $clamJob{'jobName'} scan...\n");
 	# >/dev/null 2>&1
 
-	my $borgCommand = "borg create $clamJob{'arguments'} --exclude-from $clamJob{'excludeFile'} $clamJob{'repository'}" . "::$clamJob{'archiveName'} $clamJob{'backupPath'} " . '> ' . "'$clamJob{'backupLogSTDOUT'}' 2>&1";
-	&logit("\n* `$borgCommand`\n\n");
-	my $runBorg = "not run";
+	my $clamCommand = &generateClamCommand(\%clamJob);
+	&logit("\n* `$clamCommand`\n\n");
+	my $runClam = "not run";
 	if ($debug == 0) {
-		$runBorg = system("$borgCommand");
-		$runBorg = processReturnCode($runBorg);
+		$runClam = system("$clamCommand");
+		$runClam = processReturnCode($runClam);
 	}
-	&logit("#### $clamJob{'backupName'} backup borg script ran successful: *$runBorg*\n\n");
+	&logit("#### $clamJob{'jobName'} clamscan script ran successful: *$runClam*\n\n");
 
 	my @pruneTailIndent;
-	&logit("##### pruning: $clamJob{'prune'}");
-	if ($clamJob{"prune"} eq "yes" && $debug == 0) {
+	# &logit("##### pruning: $clamJob{'prune'}");
+	# if ($clamJob{"prune"} eq "yes" && $debug == 0) {
+	#
+	# 	my $pruneCommand = &generatePruneCommand(\%clamJob);
+	# 	&logit("\n* `$pruneCommand`\n\n");
+	# 	my $runPrune = "not run";
+	# 	$runPrune = system("$pruneCommand"); ## dry run on debug mode
+	# 	$runPrune = processReturnCode($runPrune);
+	# 	&logit("#### $clamJob{'backupName'} prune borg script ran successful: *$runPrune*\n");
+	# 	my $pruneTail = `cat '$clamJob{'pruneLogSTDOUT'}'`;
+	# 	@pruneTailIndent = &indent(1, $pruneTail);
+	#
+	# }
 
-		my $pruneCommand = &generatePruneCommand(\%clamJob);
-		&logit("\n* `$pruneCommand`\n\n");
-		my $runPrune = "not run";
-		$runPrune = system("$pruneCommand"); ## dry run on debug mode
-		$runPrune = processReturnCode($runPrune);
-		&logit("#### $clamJob{'backupName'} prune borg script ran successful: *$runPrune*\n");
-		my $pruneTail = `cat '$clamJob{'pruneLogSTDOUT'}'`;
-		@pruneTailIndent = &indent(1, $pruneTail);
-
-	}
-
-	&logit("* return code [reference](http://borgbackup.readthedocs.io/en/stable/usage.html#return-codes)\n\n");
 
 	$timeNow = &getTimeStampString;
-	&logit("#### $timeNow: $clamJob{'backupName'} backup finished!\n\n");
+	&logit("#### $timeNow: $clamJob{'jobName'} backup finished!\n\n");
 
 
-	my $tail = `tail -n 16 '$clamJob{'backupLogSTDOUT'}'`;
+	my $tail = `cat '$clamJob{'logFile'}'`;
 	my @tailIndent = &indent(1, $tail);
 	push @mailLog, @pruneTailIndent;
 	push @mailLog, @tailIndent;
@@ -159,25 +220,26 @@ sub runClamJob {
 
 	#close LOG
 
-	close LOG;
 	close LOCK;
 	unlink $lockFile;
 
-	&mailReport($clamJob{'mailReport'}, $clamJob{'backupName'});
+	if ($clamJob{'mailInfectionOnly'} =~ /yes/i && $runClam != 0) {
+		&mailReport($clamJob{'mailReport'}, $clamJob{'jobName'});
+	} elsif ($clamJob{'mailInfectionOnly'} !~ /yes/i) {
+		&mailReport($clamJob{'mailReport'}, $clamJob{'jobName'});
+	}
 
-	if (exists($clamJob{'onSuccessExit'})) {
+
+	if (exists($clamJob{'onSuccessExit'})) { # this may not be necessary?
 		# &finishCommand
-		if (($runBorg == 0 || $runPrune == 0)) {
+		if (($runClam == 0 || $runPrune == 0)) {
 			&finishCommand($clamJob{'onSuccessExit'})
 		}
 	}
 
 	if (exists($clamJob{'onFailureExit'})) {
 		my $runCommand = 0;
-		if ($runBorg != 0 && $runBorg ne "not run") {
-			$runCommand = 1;
-		}
-		if ($runPrune != 0 && $runPrune ne "not run") {
+		if ($runClam != 0 && $runClam ne "not run") {
 			$runCommand = 1;
 		}
 
@@ -261,15 +323,15 @@ sub logit {
 	}
 
 	print "$log";
-	if ($debug == 0) {
-		print LOG "$log";
-	}
+	# if ($debug == 0) {
+	# 	print LOG "$log";
+	# }
 	push @mailLog, $log;
 }
 
 sub mailReport {
 	my $mailTo = $_[0];
-	my $backupName = $_[1];
+	my $clamavJobName = $_[1];
 
 	if ($mailTo eq "") { #skip if no mail report set
 		return;
@@ -278,15 +340,15 @@ sub mailReport {
 	my $dateString = &getDateString;
 	my $host = `hostname`;
 	chomp($host);
-	my $from = "borgReport\@$host";
-	my $subject = "Borg Report for $backupName - $dateString";
+	my $from = "clamavReport\@$host";
+	my $subject = "ClamAV Report for $clamavJobName - $dateString";
 	my $message;
 
 	foreach(@mailLog) {
 		$message .= $_;
 	}
 
-	my $tmpMD = "/tmp/$backupName.md";
+	my $tmpMD = "/tmp/$clamavJobName.md";
 	open TMP, ">$tmpMD";
 	print TMP "$message";
 	close TMP;
@@ -306,6 +368,7 @@ sub mailReport {
 	print MAIL $md;
 
 	close(MAIL);
+	&logit('email sent successufully');
 	# print "Email Sent Successfully\n";
 }
 
@@ -378,6 +441,7 @@ mailReport = "email@address.com" # address to email reports to
 mailInfectionOnly = "NO" #optional - defaults to NO (will email whether theres an infection or not)
 excludeFile = "/PATH/TO/EXCLUDE/FILE" ## optional - needs to be opened and parsed
 detectPUA = "NO" #optional - defaults to NO
+scanArchive = "YES" #optional - defaults to YES
 infectedOnly = "YES" #optional - defaults to YES
 recursive = "YES" #optional - defaults to YES
 arguments = "[clamscan arguments]" #optional - additional arguments beyond whats provided in this interface
