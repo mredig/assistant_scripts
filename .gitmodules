@@ -1,6 +1,3 @@
 [submodule "borg_run_conf/markdown"]
 	path = borg_run_conf/markdown
 	url = https://github.com/mredig/markdown.git
-[submodule "clam_run_conf/markdown"]
-	path = clam_run_conf/markdown
-	url = https://github.com/mredig/markdown.git
