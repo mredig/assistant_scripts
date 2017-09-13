@@ -1,3 +1,4 @@
+<!-- permalink: e88c4c1676de9b3f0e8615ef1977fef6 DO NOT DELETE OR EDIT THIS LINE -->
 # secure_linux_setup_assistant
 This is intended to be run very soon after an initial setup of linux. It will do the following to help facilitate a secure linux setup:
 * install `unattended-upgrades`
