@@ -4,38 +4,46 @@ openConf();
 
 
 
-function runJob($homeDir, $dnsRecord, $rblEntries) {
+function runJob($homeDir, $dnsRecord, $rbl_override, $rblEntries) {
 	chdir($homeDir);
 
 	$dnsUpdatePreviousValue = "dnsRBLUpdatePreviousValue-$dnsRecord";
 
-	$fileHandle = fopen($dnsUpdatePreviousValue, "r");
-	$oldDns = fread($fileHandle,filesize($dnsUpdatePreviousValue));
-	fclose($fileHandle);
+	if (file_exists($dnsUpdatePreviousValue)) {
+		$fileHandle = fopen($dnsUpdatePreviousValue, "r");
+		$oldDnsIP = fread($fileHandle,filesize($dnsUpdatePreviousValue));
+		fclose($fileHandle);
+	} else {
+		$oldDnsIP = '';
+	}
+
+
 
 	$digCommand = 'dig ' . $dnsRecord . ' +short @8.8.8.8';
 
 	exec($digCommand, $digValue);
-	$rbl_override = '/etc/postfix/rbl_override';
 
 	if (isset($digValue) && is_array($digValue)) {
-		$last = $digValue[count($digValue) - 1];
-		if ($last != $oldDns && !empty($last)) {
+		$latestIP = $digValue[count($digValue) - 1];
+		if (($latestIP != $oldDnsIP && !empty($latestIP))) { //if latestIP is not same as oldDnsIP and latest ip has contents, OR rblEntires dosn't have an entry for
 
-			if (empty($oldDns)) {
-				$command = "echo '\n$last OK\n' >> /etc/postfix/rbl_override";
-			} else {
-				$command = "sed -i 's/^$oldDns/$last/' $rbl_override";
+			if (!isset($rblEntries[$latestIP])) {
+				if (isset($rblEntries[$oldDnsIP]) && !empty($oldDnsIP)) {
+					$command = "sed -i 's/^$oldDnsIP/$latestIP/' $rbl_override";
+				} else {
+					$command = "echo '\n$latestIP OK\n' >> $rbl_override";
+				}
+				print "$command\n";
+				exec($command);
+				$postmapCommand = "postmap $rbl_override";
+				exec($postmapCommand);
+				exec('service postfix restart');
+
 			}
-			print "$command\n";
-			// exec($command);
-			// exec('postmap /etc/postfix/rbl_override');
-			// exec('service postfix restart');
 
 			$fileHandle = fopen($dnsUpdatePreviousValue, "w") or die("Unable to open file: $dnsUpdatePreviousValue!");
-			$last = fwrite($fileHandle,$last);
+			$latestIP = fwrite($fileHandle,$latestIP);
 			fclose($fileHandle);
-
 		}
 	}
 }
@@ -64,28 +72,26 @@ function processConf($confFile) {
 		}
 	}
 
+	if (!isset($job['rbl_override'])) {
+		$job['rbl_override'] = "/etc/postfix/rbl_override";
+	}
+
 	// print_r($job);
 
-	$rblEntries = processRBL();
+	$rblEntries = processRBL($job['rbl_override']);
 
-	// $previousDNSValue = processPreviousValue();
-
-	runJob($job['saveDir'], $job['dynamicDNS'], $rblEntries);
+	runJob($job['saveDir'], $job['dynamicDNS'], $job['rbl_override'], $rblEntries);
 }
 
 
-// function processPreviousValue() {
-//
-// }
-//
-// function saveNewPreviousValue() {
-//
-// }
+function processRBL($rbl_override) {
 
-function processRBL() {
+	if (!file_exists($rbl_override)) {
+		return array();
+	}
 
-	$fileHandle = fopen($confFile, "r");
-	$rblContents = fread($fileHandle,filesize($confFile)) or die("Can't open conf file: $confFile!");
+	$fileHandle = fopen($rbl_override, "r");
+	$rblContents = fread($fileHandle,filesize($rbl_override)) or die("Can't open conf file: $rbl_override!");
 	fclose($fileHandle);
 
 	$rblLines = explode("\n", $rblContents);
