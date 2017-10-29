@@ -5,10 +5,13 @@ This is an aggregation of scripts I developed in coordination with my [notes to 
 
 
 ### load dependencies
-Right now, this section is no more than scratch notes:
 
-One or some combination of these should get the scripts to load with all their dependencies
-
-* `git submodule update --init --recursive`
+How to get the submodules to load their repositories
+* `git submodule init`
 * `git submodule update --recursive`
-* `git clone --recursive`
+* [reference](https://stackoverflow.com/questions/1535524/git-submodule-inside-of-a-submodule-nested-submodules)
+* [updating the repositories](https://stackoverflow.com/questions/8191299/update-a-submodule-to-the-latest-commit)
+	* looks like it's a matter of
+		1. `git submodule update --remote --merge`
+		1. `git add [submodule directory]`
+		1. `git commit -m "updated submodules"`

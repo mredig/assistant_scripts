@@ -25,7 +25,7 @@ function runJob($homeDir, $dnsRecord, $rbl_override, $rblEntries) {
 
 	if (isset($digValue) && is_array($digValue)) {
 		$latestIP = $digValue[count($digValue) - 1];
-		if (($latestIP != $oldDnsIP && !empty($latestIP))) { //if latestIP is not same as oldDnsIP and latest ip has contents, OR rblEntires dosn't have an entry for
+		if (($latestIP != $oldDnsIP && !empty($latestIP))) { //if latestIP is not same as oldDnsIP and latest ip has contents
 
 			if (!isset($rblEntries[$latestIP])) {
 				if (isset($rblEntries[$oldDnsIP]) && !empty($oldDnsIP)) {
