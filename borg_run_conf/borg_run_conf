@@ -65,11 +65,11 @@ sub processConf {
 	my %borgJob;
 	$borgJob{"confFile"} = $confFile;
 	foreach my $line (@confContents) { ## read the conf file and set each key value pair in hash to what's in the conf document
-		$line =~ s/#.*$//;
+		$line =~ s/#.*$//; # remove comments from conf line in memory
 
-		$line =~ s/\$timeNow/$timeNow/i;
+		$line =~ s/\$timeNow/$timeNow/i; # replace the $timeNow placeholder with the current value, if it exists in this line
 
-		$line =~ /^([\-\w]+)\s?=\s?\"(.*)\"/;
+		$line =~ /^([\-\w]+)\s?=\s?\"(.*)\"/; # separate the option from the value
 		my $option = $1;
 		my $value = $2;
 		# print "$option is $value\n";
@@ -107,6 +107,15 @@ sub runBorgJob {
 	my $logFile = $borgJob{'backupLog'};
 	my $lockFile = $borgJob{'lockFile'};
 
+	## run preflight
+
+	if (exists($borgJob{'preflight'})) {
+		&runExternalCommand($borgJob{'preflight'})
+	}
+
+	$ENV{'BORG_PASSPHRASE'} = $borgJob{'repoPassword'};
+
+
 #open LOG file
 	$ranSomething = 1;
 	open LOG, ">>$logFile";
@@ -138,11 +147,11 @@ sub runBorgJob {
 
 	my @pruneTailIndent;
 	&logit("##### pruning: $borgJob{'prune'}");
+	my $runPrune = "not run";
 	if ($borgJob{"prune"} eq "yes" && $debug == 0) {
 
 		my $pruneCommand = &generatePruneCommand(\%borgJob);
 		&logit("\n* `$pruneCommand`\n\n");
-		my $runPrune = "not run";
 		$runPrune = system("$pruneCommand"); ## dry run on debug mode
 		$runPrune = processReturnCode($runPrune);
 		&logit("#### $borgJob{'backupName'} prune borg script ran successful: *$runPrune*\n");
@@ -155,6 +164,8 @@ sub runBorgJob {
 
 	$timeNow = &getTimeStampString;
 	&logit("#### $timeNow: $borgJob{'backupName'} backup finished!\n\n");
+
+	$ENV{'BORG_PASSPHRASE'} = "";
 
 
 	my $tail = `tail -n 16 '$borgJob{'backupLogSTDOUT'}'`;
@@ -173,9 +184,10 @@ sub runBorgJob {
 	&mailReport($borgJob{'mailReport'}, $borgJob{'backupName'});
 
 	if (exists($borgJob{'onSuccessExit'})) {
-		# &finishCommand
-		if (($runBorg == 0 || $runPrune == 0)) {
-			&finishCommand($borgJob{'onSuccessExit'})
+		# &runExternalCommand
+		print "borg: $runBorg prune: $runPrune\n";
+		if (($runBorg == 0 && $runPrune == 0)) {
+			&runExternalCommand($borgJob{'onSuccessExit'})
 		}
 	}
 
@@ -189,7 +201,7 @@ sub runBorgJob {
 		}
 
 		if ($runCommand == 1) {
-			&finishCommand($borgJob{'onFailureExit'})
+			&runExternalCommand($borgJob{'onFailureExit'})
 		}
 	}
 
@@ -211,7 +223,7 @@ sub processReturnCode {
 
 }
 
-sub finishCommand {
+sub runExternalCommand {
 	my $command = $_[0];
 	&logit("running $command");
 	my $rCode = 0;
@@ -388,7 +400,9 @@ backupPath = "/PATH/TO/OBJECT;/PATH/TO/ANOTHER/FOLDER" # the path(s) that get ba
 excludeFile = "/PATH/TO/OBJECT"
 arguments = "--show-rc -v --stats -p --list -C zlib,9"
 backupName = "unparsed name of the backup job for log reasons"
+repoPassword = "repoPassword" # optional: only use if your repo is encrypted
 mailReport = "email@address.com" # optional: will email a report after a run is finished
+preflight = "command" # optional: an optional command to run on prior to the backup
 onSuccessExit = "command" # optional: an optional command to run on finish when either pruning or creating an archive is successful
 onFailureExit = "command" # optional: an optional command to run on finish when either pruning or creating an archive has failed
 prune = "yes" # optional: any value other than "yes" will skip pruning
