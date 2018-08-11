@@ -185,7 +185,6 @@ sub runBorgJob {
 
 	if (exists($borgJob{'onSuccessExit'})) {
 		# &runExternalCommand
-		print "borg: $runBorg prune: $runPrune\n";
 		if (($runBorg == 0 && $runPrune == 0)) {
 			&runExternalCommand($borgJob{'onSuccessExit'})
 		}
