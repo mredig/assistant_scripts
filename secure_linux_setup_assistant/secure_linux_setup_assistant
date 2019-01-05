@@ -25,6 +25,10 @@ sub main {
 	my $newUser = checkYn("Do you want to add a new user with sudo (important on raspbian, probably less so on other distros)?");
 	if ($newUser) {
 		newUserSetup();
+	} else {
+		if (checkYn("Is there an existing user you'd like to configure with sudo permissions? (this script will lock the root account)")) {
+			setupSudo();
+		}
 	}
 
 	printHeader("ssh Setup");
@@ -161,7 +165,32 @@ sub configMail {
 }
 
 sub newUserSetup {
-	print "What username would you like?: ";
+	my $newUsername = promptForUsername("What username would you like?");
+
+	print "Adding new user '$newUsername' - please follow prompts from system utility:\n";
+	$gNewUsername = $newUsername;
+	runOnSystem("adduser $newUsername");
+	setupSudo();
+
+	checkPiUser();
+}
+
+sub setupSudo {
+
+	if (length($gNewUsername) == 0) {
+		my $newUsername = promptForUsername("What user do you want to grant sudo to?");
+		while (doesItExist("/home/$newUsername") == 0) {
+			print "$newUsername doesn't exist at /home/$newUsername - please try again:\n";
+			$newUsername = promptForUsername("What user do you want to grant sudo to?");
+		}
+		$gNewUsername = $newUsername;
+	}
+	runOnSystem("adduser $gNewUsername sudo");
+}
+
+sub promptForUsername {
+	my $prompt = $_[0];
+	print "$prompt: ";
 	chomp(my $newUsername = <STDIN>);
 	$newUsername =~ s/\W//gi;
 	while (checkYn("'$newUsername' - is this correct?") == 0) {
@@ -169,12 +198,7 @@ sub newUserSetup {
 		chomp($newUsername = <STDIN>);
 		$newUsername =~ s/\W//gi;
 	}
-	print "Adding new user '$newUsername' - please follow prompts from system utility:\n";
-	$gNewUsername = $newUsername;
-	runOnSystem("adduser $newUsername");
-	runOnSystem("adduser $newUsername sudo");
-
-	checkPiUser();
+	return $newUsername;
 }
 
 sub sshSetup {
@@ -205,7 +229,7 @@ sub sshSetup {
 	chdir ".ssh";
 	if (doesItExist("id_rsa") == 0) {
 		print "Creating ssh key - follow prompts and\n\t-add a password if you like, but I would argue it's not necessary\n";
-		runOnSystem("ssh-keygen -t rsa -b 4096 -t /home/$gNewUsername/.ssh/id_rsa -C $gNewUsername\@$hostname");
+		runOnSystem("ssh-keygen -t rsa -b 4096 -f /home/$gNewUsername/.ssh/id_rsa -C $gNewUsername\@$hostname");
 		my $printPub = checkYn("Would you like the public key printed onscreen?");
 		if ($printPub) {
 			showFileContents("id_rsa.pub");
