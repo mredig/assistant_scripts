@@ -20,6 +20,12 @@ sub main {
 	print "Be sure that this script is launched AS ROOT (NOT sudo and NOT su - I mean you CAN run it with those, but you might run into errors) as it will be facilitating many system level changes, including manipulating users.\n";
 	enterToContinue();
 
+	runOnSystem('clear && clear');
+	print "IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT \n";
+	print "This script assumes you're running a debian based system - if this isn't the case, it won't work and could potentially screw things up royally! Proceed only if you have Debian, Ubuntu, or somehting derivative!\n";
+	print "IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT IMPORTANT \n";
+	enterToContinue();
+
 	printHeader("New User Setup");
 
 	my $newUser = checkYn("Do you want to add a new user with sudo (important on raspbian, probably less so on other distros)?");
@@ -203,7 +209,7 @@ sub promptForUsername {
 
 sub sshSetup {
 	my $sshConfirm;
-	if ($gNewUsername ne "") {
+	if (length($gNewUsername) > 0) {
 		$sshConfirm = checkYn("Would you like to configure ssh for $gNewUsername?");
 	} else {
 		$sshConfirm = checkYn("Would you like to configure ssh for a user?");
@@ -249,10 +255,6 @@ sub sshSetup {
 
 	runOnSystem("chmod -R 700 .ssh");
 	runOnSystem("chown -R $gNewUsername:$gNewUsername .ssh");
-
-
-
-
 }
 
 
@@ -416,7 +418,6 @@ sub updates {
 	my $runUpgrades = checkYn("Do you want to run upgrades before continuing? (apt-get update will run regardless)");
 
 	fixListChanges();
-	# &enterToContinue;
 
 	runOnSystem('apt-get update');
 
@@ -424,7 +425,7 @@ sub updates {
 		runOnSystem("apt-get upgrade -y");
 	}
 
-	runOnSystem('apt-get install unattended-upgrades bsd-mailx fail2ban ufw -y')
+	runOnSystem('apt-get install -y unattended-upgrades bsd-mailx fail2ban ufw sudo')
 
 }
 
