@@ -189,6 +189,8 @@ sub sshSetup {
 		return;
 	}
 
+	my $hostname = getSTDOUTfromSystem("hostname");
+
 	if ($gNewUsername eq "") {
 		print "Which user?: ";
 		chomp($gNewUsername = <STDIN>);
@@ -202,8 +204,8 @@ sub sshSetup {
 	}
 	chdir ".ssh";
 	if (doesItExist("id_rsa") == 0) {
-		print "Creating ssh key - follow prompts and\n\t-save file as /home/$gNewUsername/.ssh/id_rsa\n\t-add a password if you like, but I would argue it's not necessary\n";
-		runOnSystem("ssh-keygen -t rsa -b 4096");
+		print "Creating ssh key - follow prompts and\n\t-add a password if you like, but I would argue it's not necessary\n";
+		runOnSystem("ssh-keygen -t rsa -b 4096 -t /home/$gNewUsername/.ssh/id_rsa -C $gNewUsername\@$hostname");
 		my $printPub = checkYn("Would you like the public key printed onscreen?");
 		if ($printPub) {
 			showFileContents("id_rsa.pub");
@@ -498,7 +500,18 @@ sub runOnSystem {
 		print "\n\n[[executing: $command]]\n\n";
 		system("$command");
 	}
+}
 
+sub getSTDOUTfromSystem {
+	my $command = $_[0];
+	my $rVal = "some standard output";
+	if ($debug) {
+		print "debug - would run: $command\n";
+	} else {
+		print "\n\n[[executing: $command]]\n\n";
+		$rVal = `$command`;
+	}
+	return $rVal;
 }
 
 sub dieWithMessage {
