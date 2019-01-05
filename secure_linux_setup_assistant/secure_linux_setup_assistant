@@ -7,54 +7,54 @@ if ($ARGV[0] eq "-d") {
 $gNewUsername;
 
 
-&main;
+main();
 
 sub main {
-	&runOnSystem('clear && clear');
+	runOnSystem('clear && clear');
 
-	&sshdRootAccessCheck;
+	sshdRootAccessCheck();
 
 	print "This script is based off my notes to myself after doing some reserach on securing linux. This occurred after one of my Raspberry Pis became infected with a virus and reinforced the imporatance after the Dyn internet outage. See http://bit.ly/lin-sec for more info.\n";
-	&enterToContinue;
+	enterToContinue();
 
 	print "Be sure that this script is launched AS ROOT (NOT sudo and NOT su - I mean you CAN run it with those, but you might run into errors) as it will be facilitating many system level changes, including manipulating users.\n";
-	&enterToContinue;
+	enterToContinue();
 
-	&printHeader("New User Setup");
+	printHeader("New User Setup");
 
-	my $newUser = &checkYn("Do you want to add a new user with sudo (important on raspbian, probably less so on other distros)?");
+	my $newUser = checkYn("Do you want to add a new user with sudo (important on raspbian, probably less so on other distros)?");
 	if ($newUser) {
-		&newUserSetup;
+		newUserSetup();
 	}
 
-	&printHeader("ssh Setup");
-	&sshSetup;
+	printHeader("ssh Setup");
+	sshSetup();
 
-	&printHeader("system ssh Setup");
+	printHeader("system ssh Setup");
 	chdir "/etc/ssh";
-	if (&doesItExist("sshd_config.default") == 0) {
-		&runOnSystem("cp sshd_config sshd_config.default");
-		&runOnSystem("chmod 700 sshd_config.default");
+	if (doesItExist("sshd_config.default") == 0) {
+		runOnSystem("cp sshd_config sshd_config.default");
+		runOnSystem("chmod 700 sshd_config.default");
 	}
-	&sshdConfiguration;
+	sshdConfiguration();
 
 
-	&printHeader("Getting up to Date");
+	printHeader("Getting up to Date");
 
 
 	print "Please note that since the next step installs packages that require configuration afterwards, you will need to come back in a few minutes after the installation completes.";
-	&enterToContinue;
+	enterToContinue();
 
-	&updates; #bsd-mailx setup must happen after this & ufw
+	updates(); #bsd-mailx setup must happen after this & ufw
 
 	my $configMail = checkYn("Do you want to configure the mailx package?");
-	&configMail($configMail);
+	configMail($configMail);
 
-	&configUpdates;
+	configUpdates();
 
-	&configFirewall;
+	configFirewall();
 
-	&finishUp;
+	finishUp();
 }
 
 sub configFirewall {
@@ -63,10 +63,10 @@ sub configFirewall {
 	# note ssh for user
 
 	print "About to show running processes with open network sockets to help with configuring firewall";
-	&enterToContinue;
-	&runOnSystem("netstat -tulpn");
+	enterToContinue();
+	runOnSystem("netstat -tulpn");
 
-	my $limitedSubnetSetup = &checkYn("Do you want to limit any connections to just one subnet?");
+	my $limitedSubnetSetup = checkYn("Do you want to limit any connections to just one subnet?");
 
 	my @ufwCommands;
 	if ($limitedSubnetSetup) {
@@ -87,7 +87,7 @@ sub configFirewall {
 	}
 
 
-	my $openSetup = &checkyN("Do you want to allow any connections from anywhere?");
+	my $openSetup = checkyN("Do you want to allow any connections from anywhere?");
 	if ($openSetup) {
 		print "Please enter all ports separated by spaces that you wish to have accessible from any network, whether it's part of this subnet or not (don't forget you need port 22 for ssh to work if you are setting up through that):\n";
 		chomp(my $ports = <STDIN>);
@@ -118,7 +118,7 @@ sub configFirewall {
 
 		print UFW "rm $ufwFile\n";
 
-		my $esc = &escapeSpecial($ufwFile);
+		my $esc = escapeSpecial($ufwFile);
 		print UFW "(crontab -l 2>/dev/null) | sed 's/^\\(\@reboot $esc.*\\)/# \\1/' | crontab -";
 		close UFW;
 
@@ -126,10 +126,10 @@ sub configFirewall {
 		# echo '@reboot env > ~/env' | sed 's/^\(.*env > ~\/env.*\)/# \1/'
 		# crontab -l 2>/dev/null; echo '\@reboot $ufwFile') | sed 's/^\(//' | crontab -")
 
-		&runOnSystem("(crontab -l 2>/dev/null;echo '\@reboot $ufwFile') | crontab -");
+		runOnSystem("(crontab -l 2>/dev/null;echo '\@reboot $ufwFile') | crontab -");
 
 	} else {
-		&configFirewall;
+		configFirewall();
 	}
 
 }
@@ -143,19 +143,19 @@ sub escapeSpecial {
 
 sub configUpdates {
 	print "Please choose yes to activate unattended-upgrades:";
-	&enterToContinue;
-	&runOnSystem("dpkg-reconfigure unattended-upgrades");
+	enterToContinue();
+	runOnSystem("dpkg-reconfigure unattended-upgrades");
 	print "About to open config for unattended-upgrades - please make sure the stuff you need isn't commented and pay attention to the email and reboot settings:";
-	&enterToContinue;
-	&runOnSystem("nano /etc/apt/apt.conf.d/50unattended-upgrades");
+	enterToContinue();
+	runOnSystem("nano /etc/apt/apt.conf.d/50unattended-upgrades");
 }
 
 sub configMail {
 	my $config = $_[0];
 	if ($config) {
 		print "Follow prompts and use common sense for setup:";
-		&enterToContinue;
-		&runOnSystem("dpkg-reconfigure exim4-config");
+		enterToContinue();
+		runOnSystem("dpkg-reconfigure exim4-config");
 	}
 
 }
@@ -164,30 +164,30 @@ sub newUserSetup {
 	print "What username would you like?: ";
 	chomp(my $newUsername = <STDIN>);
 	$newUsername =~ s/\W//gi;
-	my $confirm = &checkYn("'$newUsername' - is this correct?");
+	my $confirm = checkYn("'$newUsername' - is this correct?");
 	if ($confirm == 0) {
 		print "Try one more time: ";
 		chomp($newUsername = <STDIN>);
 		$newUsername =~ s/\W//gi;
-		$confirm = &checkYn("'$newUsername' - is this correct?");
+		$confirm = checkYn("'$newUsername' - is this correct?");
 		if ($confirm == 0) {
-			&dieWithMessage("too many username attempts");
+			dieWithMessage("too many username attempts");
 		}
 	}
 	print "Adding new user '$newUsername' - please follow prompts from system utility:\n";
 	$gNewUsername = $newUsername;
-	&runOnSystem("adduser $newUsername");
-	&runOnSystem("adduser $newUsername sudo");
+	runOnSystem("adduser $newUsername");
+	runOnSystem("adduser $newUsername sudo");
 
-	&checkPiUser;
+	checkPiUser();
 }
 
 sub sshSetup {
 	my $sshConfirm;
 	if ($gNewUsername ne "") {
-		$sshConfirm = &checkYn("Would you like to configure ssh for $gNewUsername?");
+		$sshConfirm = checkYn("Would you like to configure ssh for $gNewUsername?");
 	} else {
-		$sshConfirm = &checkYn("Would you like to configure ssh for a user?");
+		$sshConfirm = checkYn("Would you like to configure ssh for a user?");
 	}
 
 	if ($sshConfirm == 0) {
@@ -202,21 +202,21 @@ sub sshSetup {
 
 	chdir "/home/";
 	chdir "$gNewUsername";
-	if (&doesItExist(".ssh") == 0) {
-		&runOnSystem("mkdir .ssh");
+	if (doesItExist(".ssh") == 0) {
+		runOnSystem("mkdir .ssh");
 	}
 	chdir ".ssh";
-	if (&doesItExist("id_rsa") == 0) {
+	if (doesItExist("id_rsa") == 0) {
 		print "Creating ssh key - follow prompts and\n\t-save file as /home/$gNewUsername/.ssh/id_rsa\n\t-add a password if you like, but I would argue it's not necessary\n";
-		&runOnSystem("ssh-keygen -t rsa -b 4096");
-		my $printPub = &checkYn("Would you like the public key printed onscreen?");
+		runOnSystem("ssh-keygen -t rsa -b 4096");
+		my $printPub = checkYn("Would you like the public key printed onscreen?");
 		if ($printPub) {
-			&showFileContents("id_rsa.pub");
+			showFileContents("id_rsa.pub");
 		}
 	}
 
-	if (&doesItExist("authorized_keys") == 0) {
-		&runOnSystem("touch authorized_keys");
+	if (doesItExist("authorized_keys") == 0) {
+		runOnSystem("touch authorized_keys");
 	}
 	print "Paste any public ssh keys in here and press CTRL-D when finished (http://bit.ly/ssh-keygen for more info):\n\n";
 	my @publicKeys = <STDIN>;
@@ -226,8 +226,8 @@ sub sshSetup {
 
 	chdir "../";
 
-	&runOnSystem("chmod -R 700 .ssh");
-	&runOnSystem("chown -R $gNewUsername:$gNewUsername .ssh");
+	runOnSystem("chmod -R 700 .ssh");
+	runOnSystem("chown -R $gNewUsername:$gNewUsername .ssh");
 
 
 
@@ -240,19 +240,19 @@ sub sshdRootAccessCheck {
 	my @sshdconf = <SSHDCONFIG>;
 	close SSHDCONFIG;
 
-	my $rootOn = &sshdGetOption("PermitRootLogin", @sshdconf);
+	my $rootOn = sshdGetOption("PermitRootLogin", @sshdconf);
 	if ($rootOn !~ /yes/i) {
 		my $argument = "Would you like to temporarily set a root password and enable root login over ssh so you can run this utility? This allows you to be able to easily copy/paste your ssh public key and assures that the other portions of the script will function correctly. These options will be reverted by keeping with the defaults of this script when run from ssh. (also please make sure you're running this with elevated privileges)";
-		my $turnItOn = &checkYn("$argument");
+		my $turnItOn = checkYn("$argument");
 		if ($turnItOn == 1) {
-			@sshdconf = &sshdAddOption("PermitRootLogin", "yes", @sshdconf);
-			@sshdconf = &sshdAddOption("PasswordAuthentication", "yes", @sshdconf);
+			@sshdconf = sshdAddOption("PermitRootLogin", "yes", @sshdconf);
+			@sshdconf = sshdAddOption("PasswordAuthentication", "yes", @sshdconf);
 			open SSHDCONFIG, ">/etc/ssh/sshd_config" or die "Can't save /etc/ssh/sshd_config: $!\n";
 			foreach(@sshdconf) {
 				print SSHDCONFIG $_;
 			}
 			close SSHDCONFIG;
-			&runOnSystem("/etc/init.d/ssh restart");
+			runOnSystem("/etc/init.d/ssh restart");
 			die "Run the following commands to change the root password:\n\n\tsudo su\n\tpasswd\n\texit\n\n...Close any other non root sessions and then log in over ssh. Also recommended is to run raspi-config if you're running a Pi before rebooting.\n";
 		}
 
@@ -266,50 +266,50 @@ sub sshdConfiguration {
 		my @sshdconf = <SSHDCONFIG>;
 		close SSHDCONFIG;
 
-		my $permitRoot = &checkyN("Do you want to permit root access to ssh?");
+		my $permitRoot = checkyN("Do you want to permit root access to ssh?");
 		if ($permitRoot == 1) {
-			@sshdconf = &sshdAddOption("PermitRootLogin", "yes", @sshdconf);
+			@sshdconf = sshdAddOption("PermitRootLogin", "yes", @sshdconf);
 		} else {
-			@sshdconf = &sshdAddOption("PermitRootLogin", "no", @sshdconf);
+			@sshdconf = sshdAddOption("PermitRootLogin", "no", @sshdconf);
 		}
 
-		my $passwordAuth = &checkyN("Do you want to allow password login over ssh (Important! Choose YES if you didn't setup any public keys earlier or you will be locked out of ssh!)?");
+		my $passwordAuth = checkyN("Do you want to allow password login over ssh (Important! Choose YES if you didn't setup any public keys earlier or you will be locked out of ssh!)?");
 		if ($passwordAuth == 1) {
-			@sshdconf = &sshdAddOption("PasswordAuthentication", "yes", @sshdconf);
+			@sshdconf = sshdAddOption("PasswordAuthentication", "yes", @sshdconf);
 		} else {
-			@sshdconf = &sshdAddOption("PasswordAuthentication", "no", @sshdconf);
+			@sshdconf = sshdAddOption("PasswordAuthentication", "no", @sshdconf);
 		}
 
-		my $ip4Address = &checkYn("Do you want to allow ssh access on IPv4?");
-		my $ip6Address = &checkyN("Do you want to allow ssh access on IPv6?");
+		my $ip4Address = checkYn("Do you want to allow ssh access on IPv4?");
+		my $ip6Address = checkyN("Do you want to allow ssh access on IPv6?");
 		if ($ip4Address == 1 && $ip6Address == 1) {
-			@sshdconf = &sshdAddOption("AddressFamily", "any", @sshdconf);
+			@sshdconf = sshdAddOption("AddressFamily", "any", @sshdconf);
 
 		} elsif ($ip4Address == 0 && $ip6Address == 1) {
-			@sshdconf = &sshdAddOption("AddressFamily", "inet6", @sshdconf);
+			@sshdconf = sshdAddOption("AddressFamily", "inet6", @sshdconf);
 
 		} elsif ($ip4Address == 1 && $ip6Address == 0) {
-			@sshdconf = &sshdAddOption("AddressFamily", "inet", @sshdconf);
+			@sshdconf = sshdAddOption("AddressFamily", "inet", @sshdconf);
 
 		}
 
-		my $changePort = &checkyN("Do you want to change the default port for ssh?");
+		my $changePort = checkyN("Do you want to change the default port for ssh?");
 		if ($changePort == 1) {
 			print "What port?: ";
 			chomp(my $sshPort = <STDIN>);
 			$sshPort =~ s/\D//;
-			@sshdconf = &sshdAddOption("Port", $sshPort, @sshdconf);
+			@sshdconf = sshdAddOption("Port", $sshPort, @sshdconf);
 
 		}
 
 		print "Here's the new sshd_config:";
 
-		&enterToContinue;
+		enterToContinue();
 		foreach(@sshdconf) {
 			print $_;
 		}
 
-		my $saveSSHD = &checkYn("Save these changes to sshd_config (a backup has been made)?");
+		my $saveSSHD = checkYn("Save these changes to sshd_config (a backup has been made)?");
 		if ($saveSSHD && $debug == 0) {
 			open SSHDCONFIG, ">sshd_config";
 			foreach(@sshdconf) {
@@ -319,7 +319,7 @@ sub sshdConfiguration {
 		} else {
 			my $again = checkYn("Would you like to go through sshd_config setup again?");
 			if ($again) {
-				&sshdConfiguration;
+				sshdConfiguration();
 			}
 		}
 }
@@ -359,15 +359,15 @@ sub sshdGetOption {
 }
 
 sub checkPiUser {
-	my $remove = &checkyN("This is only relevant if you are using raspbian - would you like to remove the user and homefolder for 'pi'? (Note that this only works if you are NOT using sudo or su - aka logged directly into root!)");
+	my $remove = checkyN("This is only relevant if you are using raspbian - would you like to remove the user and homefolder for 'pi'? (Note that this only works if you are NOT using sudo or su - aka logged directly into root!)");
 	if ($remove) {
-		&runOnSystem("deluser --remove-home pi");
+		runOnSystem("deluser --remove-home pi");
 	}
 
 }
 
 sub updates {
-	my $piAptSources = &checkyN("Is this a Pi that you would like to set to a US apt mirror for?");
+	my $piAptSources = checkyN("Is this a Pi that you would like to set to a US apt mirror for?");
 	if ($piAptSources == 1) {
 		my $sourcesPath = "/etc/apt/sources.list";
 		open SOURCES, "<$sourcesPath";
@@ -392,18 +392,18 @@ sub updates {
 
 
 
-	my $runUpgrades = &checkYn("Do you want to run upgrades before continuing? (apt-get update will run regardless)");
+	my $runUpgrades = checkYn("Do you want to run upgrades before continuing? (apt-get update will run regardless)");
 
-	&fixListChanges;
+	fixListChanges();
 	# &enterToContinue;
 
-	&runOnSystem('apt-get update');
+	runOnSystem('apt-get update');
 
 	if ($runUpgrades) {
-		&runOnSystem("apt-get upgrade -y");
+		runOnSystem("apt-get upgrade -y");
 	}
 
-	&runOnSystem('apt-get install unattended-upgrades bsd-mailx fail2ban ufw -y')
+	runOnSystem('apt-get install unattended-upgrades bsd-mailx fail2ban ufw -y')
 
 }
 
@@ -413,9 +413,9 @@ sub fixListChanges {
 	my @listChanges = <LISTCHANGES>;
 	close LISTCHANGES;
 
-	@listChanges = &listChangesAddOption("frontend", "text", @listChanges);
+	@listChanges = listChangesAddOption("frontend", "text", @listChanges);
 
-	my $changeApt = &checkYn("Change $aptChanges to NOT stop apt upgrades?");
+	my $changeApt = checkYn("Change $aptChanges to NOT stop apt upgrades?");
 	if ($changeApt) {
 		open LISTCHANGES, ">$aptChanges";
 		foreach(@listChanges) {
@@ -450,19 +450,19 @@ sub finishUp {
 	print "Running a few finishing touches...";
 	# restart ssh
 	print "Restarting ssh...";
-	&runOnSystem("service ssh restart");
+	runOnSystem("service ssh restart");
 	print "Done.\n";
 
 	my $lockRootPass = checkYn("Would you like to lock the root password? (You can still sudo or sudo su, even with the option to set the password again in the future)");
 	if ($lockRootPass) {
-		&runOnSystem("passwd -l root");
+		runOnSystem("passwd -l root");
 	}
 
 
 
-	my $reboot = &checkYn("Finished. Would you like to reboot now?");
+	my $reboot = checkYn("Finished. Would you like to reboot now?");
 	if ($reboot) {
-		&runOnSystem("reboot");
+		runOnSystem("reboot");
 	}
 
 }
@@ -491,7 +491,7 @@ sub doesItExist {
 
 sub printHeader {
 	my $header = $_[0];
-	&runOnSystem("clear");
+	runOnSystem("clear");
 	print "\n\n\t$header:\n\n";
 }
 
