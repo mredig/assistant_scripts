@@ -164,15 +164,10 @@ sub newUserSetup {
 	print "What username would you like?: ";
 	chomp(my $newUsername = <STDIN>);
 	$newUsername =~ s/\W//gi;
-	my $confirm = checkYn("'$newUsername' - is this correct?");
-	if ($confirm == 0) {
+	while (checkYn("'$newUsername' - is this correct?") == 0) {
 		print "Try one more time: ";
 		chomp($newUsername = <STDIN>);
 		$newUsername =~ s/\W//gi;
-		$confirm = checkYn("'$newUsername' - is this correct?");
-		if ($confirm == 0) {
-			dieWithMessage("too many username attempts");
-		}
 	}
 	print "Adding new user '$newUsername' - please follow prompts from system utility:\n";
 	$gNewUsername = $newUsername;
