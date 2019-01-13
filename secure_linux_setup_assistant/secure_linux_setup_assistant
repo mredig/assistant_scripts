@@ -425,7 +425,7 @@ sub updates {
 		runOnSystem("apt-get upgrade -y");
 	}
 
-	runOnSystem('apt-get install -y unattended-upgrades bsd-mailx fail2ban ufw sudo')
+	runOnSystem('apt-get install -y unattended-upgrades bsd-mailx fail2ban ufw sudo mosh')
 
 }
 
