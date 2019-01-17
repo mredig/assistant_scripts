@@ -238,6 +238,9 @@ sub sshSetup {
 	if (checkYn("Would you like to import public keys from GitHub?")) {
 		my $gitHubUn = promptForUsername("Enter your GitHub username");
 		runOnSystem("curl https://github.com/$gitHubUn" . ".keys >> authorized_keys");
+		print "Just to confirm, here is the contents of authorized_keys:\n";
+		enterToContinue();
+		showFileContents("authorized_keys");
 	}
 
 	print "Paste any additional public ssh keys in here and press CTRL-D when finished (http://bit.ly/ssh-keygen for more info):\n\n";
