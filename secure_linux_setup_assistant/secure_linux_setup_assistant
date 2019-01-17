@@ -194,18 +194,7 @@ sub setupSudo {
 	runOnSystem("adduser $gNewUsername sudo");
 }
 
-sub promptForUsername {
-	my $prompt = $_[0];
-	print "$prompt: ";
-	chomp(my $newUsername = <STDIN>);
-	$newUsername =~ s/\W//gi;
-	while (checkYn("'$newUsername' - is this correct?") == 0) {
-		print "Try one more time: ";
-		chomp($newUsername = <STDIN>);
-		$newUsername =~ s/\W//gi;
-	}
-	return $newUsername;
-}
+
 
 sub sshSetup {
 	my $sshConfirm;
@@ -245,7 +234,13 @@ sub sshSetup {
 	if (doesItExist("authorized_keys") == 0) {
 		runOnSystem("touch authorized_keys");
 	}
-	print "Paste any public ssh keys in here and press CTRL-D when finished (http://bit.ly/ssh-keygen for more info):\n\n";
+
+	if (checkYn("Would you like to import public keys from GitHub?")) {
+		my $gitHubUn = promptForUsername("Enter your GitHub username");
+		runOnSystem("curl https://github.com/$gitHubUn" . ".keys >> authorized_keys");
+	}
+
+	print "Paste any additional public ssh keys in here and press CTRL-D when finished (http://bit.ly/ssh-keygen for more info):\n\n";
 	my @publicKeys = <STDIN>;
 	open KEYS, ">>authorized_keys";
 	print KEYS "@publicKeys";
@@ -547,6 +542,19 @@ sub dieWithMessage {
 sub enterToContinue {
 	print "\nPress enter to continue...\n";
 	my $enter = <STDIN>;
+}
+
+sub promptForUsername {
+	my $prompt = $_[0];
+	print "$prompt: ";
+	chomp(my $newUsername = <STDIN>);
+	$newUsername =~ s/\W//gi;
+	while (checkYn("'$newUsername' - is this correct?") == 0) {
+		print "Try one more time: ";
+		chomp($newUsername = <STDIN>);
+		$newUsername =~ s/\W//gi;
+	}
+	return $newUsername;
 }
 
 sub checkYn {
