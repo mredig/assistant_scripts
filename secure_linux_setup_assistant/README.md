@@ -25,4 +25,4 @@ There are a few reasons
 Ultimately, you are free to run it through elevation or on a console session, but some of the features won't work (and might not completely reflect the fact that they didn't)
 
 
-This project originated as part of my Notes to self, but after some development I decided to separate these into separate projects and use submodules to keep them together
+This project originated as part of my Notes to self (and further originated when I found [malware](https://www.google.com/search?q=linux+kaiten) on one of my linux installs), but after some development I decided to separate these into separate projects and use submodules to keep them together
